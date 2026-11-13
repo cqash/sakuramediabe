@@ -37,14 +37,15 @@ def _load_fetch_bundled_plugins_module():
     return module
 
 
-def test_bundled_metadata_plugin_order_startup_default():
+def test_bundled_plugin_order_and_minimal_set():
     module = _load_fetch_bundled_plugins_module()
 
-    assert [spec.plugin_id for spec in module.BUNDLED_PLUGINS[:4]] == [
+    assert [spec.plugin_id for spec in module.BUNDLED_PLUGINS] == [
         "sakuramedia_javbus_metadata",
-        "sakuramedia_dmm_metadata",
-        "sakuramedia_fc2_metadata",
-        "sakuramedia_fc2cmadb_metadata",
+        "sakuramedia_avmoo_metadata",
+        "sakuramedia_local_provider",
+        "sakuramedia_javdb_ranking",
+        "sakuramedia_more_rank_movies",
     ]
 
 
