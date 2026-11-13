@@ -19,10 +19,14 @@ router = APIRouter(
 
 
 def _items() -> list[MetadataSourceResource]:
+    actor_movie_ids = {
+        entry[0] for entry in MetadataSourceService.enabled_actor_movie_sources()
+    }
     return [
         MetadataSourceResource(
             plugin_id=plugin_id,
             display_name=resolve_text(name, name_i18n),
+            supports_actor_movies=plugin_id in actor_movie_ids,
         )
         for plugin_id, name, name_i18n, _source in MetadataSourceService.enabled_plugin_sources()
     ]

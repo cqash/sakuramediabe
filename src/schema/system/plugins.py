@@ -55,6 +55,8 @@ class PluginSettingsUpdateResource(PluginSettingsResource):
 class MetadataSourceResource(SchemaModel):
     plugin_id: str
     display_name: str
+    # 插件声明了 fetch_actor_movies，会参与订阅演员影片同步。
+    supports_actor_movies: bool = False
 
 
 class MetadataSourceOrderRequest(SchemaModel):
