@@ -9,7 +9,7 @@ from src.scheduler.contracts import JobDefinition
 from src.scheduler.registry import JOB_REGISTRY, JOB_REGISTRY_BY_KEY
 from src.schema.system.jobs import JobMetadataResource, ManualJobTriggerResponse
 from src.service.system.activity import TaskRunConflictError, TaskRunService
-from src.service.system.activity.task_text import resolve_job_cli_help
+from src.service.system.activity.task_text import resolve_job_task_name
 from src.service.system.optional_services import job_disabled_reason
 from src.start.aps import get_job_cron_setting, resolve_job_cron_expr, submit_manual_job
 
@@ -42,7 +42,9 @@ def _build_job_metadata(
         task_key=job_def.task_key,
         log_name=job_def.log_name,
         cli_name=job_def.cli_name,
-        cli_help=resolve_job_cli_help(job_def),
+        # 前端把 cli_help 当任务展示名使用；内置任务走 tasks.<task_key>.name，
+        # 插件任务仍用 cli_help_i18n，随请求语言解析。
+        cli_help=resolve_job_task_name(job_def),
         plugin_id=job_def.plugin_id,
         cron_setting=get_job_cron_setting(job_def),
         cron_expr=resolve_job_cron_expr(job_def),

@@ -176,11 +176,12 @@ class ImportTaskService:
             "library_id": library.id,
         }
         scope_key = library_import_scope_key(library=library)
-        task_name = (
-            f"下载任务重新导入（{len(batch_items)}个）"
+        name_key = (
+            "tasks.library_import.title.download_reimport"
             if trigger_type == "manual"
-            else f"下载任务连续导入（{len(batch_items)}个）"
+            else "tasks.library_import.title.download_continuous_import"
         )
+        task_name = translate(name_key, count=len(batch_items))
         with get_database().atomic():
             task_run = ActivityService.create_task_run(
                 task_key=cls.TASK_KEY,
@@ -269,7 +270,7 @@ class ImportTaskService:
             }
             retry_task_run = ActivityService.create_task_run(
                 task_key=cls.TASK_KEY,
-                task_name="JAV失败项重试导入",
+                task_name=translate("tasks.library_import.title.failed_item_retry"),
                 trigger_type="manual",
                 scope_key=scope_key,
                 params=params,
@@ -621,8 +622,12 @@ class ImportTaskService:
 
     @staticmethod
     def _task_name(request: ImportRequest) -> str:
-        kind = "JAV" if request.media_kind == "jav" else "视频"
-        return f"{kind}媒体库导入"
+        key = (
+            "tasks.library_import.title.jav_import"
+            if request.media_kind == "jav"
+            else "tasks.library_import.title.video_import"
+        )
+        return translate(key)
 
     @staticmethod
     def _set_download_status(download_task_id: int | None, status: str) -> None:

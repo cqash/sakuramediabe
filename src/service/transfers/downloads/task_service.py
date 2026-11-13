@@ -10,6 +10,7 @@ from src.common.media_import_status import (
     IMPORT_STATUS_SKIPPED,
 )
 from src.common.service_helpers import validate_page, with_movie_card_relations
+from src.i18n import translate
 from src.model import (
     DownloadResourceBlacklist,
     DownloadSubmissionRecord,
@@ -196,7 +197,10 @@ class DownloadTaskService:
             request,
             trigger_type=trigger_type,
             download_task_id=task.id,
-            task_name=f"下载任务导入 {task.movie or task.display_name or task.name}",
+            task_name=translate(
+                "tasks.library_import.title.download_import",
+                title=task.movie or task.display_name or task.name,
+            ),
             allowed_download_statuses=importable_statuses,
         )
         return DownloadTaskImportResponse(

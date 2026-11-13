@@ -7,6 +7,7 @@ class JobMetadataResource(SchemaModel):
     plugin_id: str | None = None
     log_name: str
     cli_name: str
+    # 面向界面的任务展示名，按请求语言读时解析；不是 CLI --help 原文。
     cli_help: str
     # manual_only 任务没有 cron 配置与表达式，返回 null。
     cron_setting: str | None = None

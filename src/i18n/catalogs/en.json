@@ -41,12 +41,26 @@
   "tasks.media_resolution_backfill.name": "Media resolution backfill",
   "tasks.media_file_scan.name": "Media file scan",
   "tasks.media_thumbnail_generation.name": "Media thumbnail generation",
+  "tasks.media_thumbnail_pack_backfill.name": "Media thumbnail pack backfill",
+  "tasks.movie_asset_pack_backfill.name": "Movie asset pack backfill",
   "tasks.image_search_index.name": "Image search index build",
   "tasks.moment_recommendation_generate.name": "Recommended moment generation",
   "tasks.daily_recommendation_generate.name": "Daily recommendation snapshot generation",
   "tasks.gfriends_filetree_refresh.name": "GFriends cache refresh",
   "tasks.activity_record_cleanup.name": "Task record cleanup",
   "tasks.library_import.name": "Media library import",
+  "tasks.library_import.title.jav_import": "JAV media library import",
+  "tasks.library_import.title.video_import": "Video media library import",
+  "tasks.library_import.title.download_import": "Download task import: {title}",
+  "tasks.library_import.title.download_reimport": {
+    "one": "Re-import 1 downloaded task",
+    "other": "Re-import {count} downloaded tasks"
+  },
+  "tasks.library_import.title.download_continuous_import": {
+    "one": "Continuous import of 1 downloaded task",
+    "other": "Continuous import of {count} downloaded tasks"
+  },
+  "tasks.library_import.title.failed_item_retry": "Retry failed JAV import items",
   "tasks.media_storage_transfer.name": "Media storage transfer",
   "tasks.batch_operation.name": "Batch operation",
   "notifications.new_media.title": "New movies are ready to play",

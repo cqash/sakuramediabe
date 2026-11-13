@@ -195,3 +195,23 @@ def test_job_metadata_uses_latest_run_and_exposes_warning(client, account_user):
     assert "recent_failure_count" not in job
     assert job["last_task_run"]["id"] == latest.id
     assert job["last_task_run"]["has_warning"] is True
+
+
+def test_jobs_returns_task_display_name_in_request_language(client, account_user):
+    auth_headers = _auth_headers(client, account_user.username)
+
+    english = client.get(
+        "/system/jobs",
+        headers={**auth_headers, "Accept-Language": "en"},
+    )
+    chinese = client.get(
+        "/system/jobs",
+        headers={**auth_headers, "Accept-Language": "zh-CN"},
+    )
+
+    assert english.status_code == 200
+    assert chinese.status_code == 200
+    english_jobs = {job["task_key"]: job for job in english.json()}
+    chinese_jobs = {job["task_key"]: job for job in chinese.json()}
+    assert english_jobs["movie_stats_sync"]["cli_help"] == "Movie stats and heat sync"
+    assert chinese_jobs["movie_stats_sync"]["cli_help"] == "影片互动数与热度同步"

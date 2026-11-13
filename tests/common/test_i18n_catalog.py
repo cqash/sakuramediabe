@@ -446,6 +446,20 @@ def test_every_registered_task_name_has_both_catalogs():
         assert key in en, task_key
 
 
+def test_every_host_job_has_name_in_both_catalogs():
+    from src.scheduler.registry import JOB_REGISTRY_BY_KEY
+
+    zh = _load_catalog("zh-CN.json")
+    en = _load_catalog("en.json")
+
+    for task_key, job_def in JOB_REGISTRY_BY_KEY.items():
+        if job_def.plugin_id is not None:
+            continue
+        key = f"tasks.{task_key}.name"
+        assert key in zh, task_key
+        assert key in en, task_key
+
+
 def test_host_notification_keys_exist_in_both_catalogs():
     zh = _load_catalog("zh-CN.json")
     en = _load_catalog("en.json")

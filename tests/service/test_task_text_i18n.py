@@ -1,8 +1,10 @@
 from contextlib import contextmanager
 
+from src.i18n import translate
 from src.i18n.locale import LanguageState, reset_language_state, set_language_state
 from src.model import BackgroundTaskRun, SystemNotification
 from src.scheduler.contracts import JobDefinition
+from src.schema.transfers.media_import import ImportRequest
 from src.service.system.activity.notifications import NotificationService
 from src.service.system.activity.task_catalog import TASK_NAME_REGISTRY
 from src.service.system.activity.task_text import (
@@ -10,6 +12,7 @@ from src.service.system.activity.task_text import (
     resolve_job_task_name,
     resolve_task_name,
 )
+from src.service.transfers.shared.import_task_service import ImportTaskService
 
 
 @contextmanager
@@ -79,6 +82,67 @@ def test_plugin_job_text_uses_cli_help_i18n():
         assert resolve_job_cli_help(_plugin_job()) == "Plugin sync"
     with _language("zh-CN"):
         assert resolve_job_task_name(_plugin_job()) == "插件同步"
+
+
+def test_import_task_name_uses_current_language():
+    jav_request = ImportRequest(media_kind="jav", library_id=1, source_ref={})
+    video_request = ImportRequest(media_kind="video", library_id=1, source_ref={})
+
+    with _language("en"):
+        assert ImportTaskService._task_name(jav_request) == "JAV media library import"
+        assert (
+            ImportTaskService._task_name(video_request)
+            == "Video media library import"
+        )
+    with _language("zh-CN"):
+        assert ImportTaskService._task_name(jav_request) == "JAV媒体库导入"
+        assert ImportTaskService._task_name(video_request) == "视频媒体库导入"
+
+
+def test_library_import_dynamic_titles_render_in_current_language():
+    with _language("en"):
+        assert (
+            translate(
+                "tasks.library_import.title.download_import",
+                title="ABC-123",
+            )
+            == "Download task import: ABC-123"
+        )
+        assert (
+            translate("tasks.library_import.title.download_reimport", count=1)
+            == "Re-import 1 downloaded task"
+        )
+        assert (
+            translate("tasks.library_import.title.download_reimport", count=3)
+            == "Re-import 3 downloaded tasks"
+        )
+        assert (
+            translate(
+                "tasks.library_import.title.download_continuous_import",
+                count=2,
+            )
+            == "Continuous import of 2 downloaded tasks"
+        )
+        assert (
+            translate("tasks.library_import.title.failed_item_retry")
+            == "Retry failed JAV import items"
+        )
+    with _language("zh-CN"):
+        assert (
+            translate(
+                "tasks.library_import.title.download_import",
+                title="ABC-123",
+            )
+            == "下载任务导入 ABC-123"
+        )
+        assert (
+            translate("tasks.library_import.title.download_reimport", count=3)
+            == "下载任务重新导入（3个）"
+        )
+        assert (
+            translate("tasks.library_import.title.failed_item_retry")
+            == "JAV失败项重试导入"
+        )
 
 
 def test_failed_task_notification_is_written_in_english(test_db):
