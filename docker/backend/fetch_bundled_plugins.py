@@ -1,7 +1,11 @@
 """解析并下载随镜像内置的官方插件包。
 
-版本不写死：仓库里只维护「插件 → GitHub 仓库」清单，每次构建都取各仓库的 latest 正式
-Release；需要复现历史镜像或临时回滚某个插件时用 ``--pin <plugin_id>=v<version>`` 固定。
+版本不写死：仓库里只维护内置 ``plugin_id`` 清单，每次构建都从插件市场的 ``index.json``
+读取各插件的 latest 正式版本；需要复现历史镜像或临时回滚某个插件时用
+``--pin <plugin_id>=v<version>`` 固定。
+
+插件源码已迁移到私有 monorepo，公开的市场仓同时承载元数据、Release 资产和编译后的
+ZIP，因此构建期不再访问单插件仓库的 ``releases/latest``。
 
 两种模式：
 - ``resolve``：只解析并打印本次将内置的版本与资产地址，供发版前人工核查（开发态预检）；
@@ -27,9 +31,16 @@ from pathlib import Path
 from typing import Any
 
 GITHUB_API_ROOT = "https://api.github.com"
+MARKET_REPO = "tinypinglite/sakuramedia-plugin-market"
+MARKET_INDEX_URL = "https://tinypinglite.github.io/sakuramedia-plugin-market/index.json"
+SUPPORTED_HOST_API_VERSION = 18
 HTTP_TIMEOUT_SECONDS = 60.0
-# tag 约定 v<version>；插件发版流程已保证 manifest.version == tag 去掉 v。
+# index.latest.version 是纯版本号；市场仓的 Release tag 是 <plugin_id>-v<version>。
 _TAG_PATTERN = re.compile(r"^v(?P<version>[0-9][0-9A-Za-z.+-]*)$")
+_VERSION_PATTERN = re.compile(r"^[0-9][0-9A-Za-z.+-]*$")
+_MARKET_TAG_PATTERN = re.compile(
+    r"^(?P<plugin_id>[a-z][a-z0-9_]*)-v(?P<version>[0-9][0-9A-Za-z.+-]*)$"
+)
 _SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 MANIFEST_FILENAME = "manifest.json"
 PACKAGE_INIT_FILENAME = "__init__.py"
@@ -39,10 +50,9 @@ BUILD_INFO_NAME = "BUILD-INFO.json"
 
 @dataclass(frozen=True)
 class BundledPluginSpec:
-    """一个内置插件：宿主 plugin_id 与它对应的 GitHub 仓库。"""
+    """一个内置插件：版本从插件市场 index 解析，不再绑定单插件仓库。"""
 
     plugin_id: str
-    repo: str
 
 
 @dataclass(frozen=True)
@@ -56,29 +66,19 @@ class ResolvedPlugin:
     asset_name: str
     asset_url: str
     checksum_url: str | None
+    # index.latest.sha256；市场仓的 Release 路径则用 checksum_url 下载 .sha256。
+    checksum_sha256: str | None = None
 
 
 # Official plugins bundled into release images. Only list plugins whose latest
-# formal Release targets Host API 18.
+# market release targets Host API 18.
 BUNDLED_PLUGINS: tuple[BundledPluginSpec, ...] = (
     # 元数据源的顺序即首次启动的默认调用顺序：JavBus 在 AVMOO 之前。
-    BundledPluginSpec(
-        "sakuramedia_javbus_metadata", "tinypinglite/sakuramedia_javbus_metadata"
-    ),
-    BundledPluginSpec(
-        "sakuramedia_avmoo_metadata", "tinypinglite/sakuramedia_avmoo_metadata"
-    ),
-    BundledPluginSpec(
-        "sakuramedia_local_provider", "tinypinglite/sakuramedia_local_provider"
-    ),
-    BundledPluginSpec(
-        "sakuramedia_javdb_ranking",
-        "tinypinglite/sakuramedia_javdb_ranking",
-    ),
-    BundledPluginSpec(
-        "sakuramedia_more_rank_movies",
-        "tinypinglite/sakuramedia_more_rank_movies",
-    ),
+    BundledPluginSpec("sakuramedia_javbus_metadata"),
+    BundledPluginSpec("sakuramedia_avmoo_metadata"),
+    BundledPluginSpec("sakuramedia_local_provider"),
+    BundledPluginSpec("sakuramedia_javdb_ranking"),
+    BundledPluginSpec("sakuramedia_more_rank_movies"),
 )
 
 
@@ -145,10 +145,12 @@ def _asset_urls(payload: dict[str, Any], *, plugin_id: str) -> dict[str, str]:
     return urls
 
 
-def _release_api_url(spec: BundledPluginSpec, pinned_tag: str | None) -> str:
-    if pinned_tag is None:
-        return f"{GITHUB_API_ROOT}/repos/{spec.repo}/releases/latest"
-    return f"{GITHUB_API_ROOT}/repos/{spec.repo}/releases/tags/{pinned_tag}"
+def _release_api_url(spec: BundledPluginSpec, pinned_tag: str) -> str:
+    """市场仓的单插件 Release tag 是 <plugin_id>-v<version>。"""
+    return (
+        f"{GITHUB_API_ROOT}/repos/{MARKET_REPO}/releases/tags/"
+        f"{spec.plugin_id}-{pinned_tag}"
+    )
 
 
 def _parse_release(
@@ -166,16 +168,16 @@ def _parse_release(
         raise BundledPluginError(
             f"release_invalid: plugin_id={spec.plugin_id} tag={tag} draft=true"
         )
+    match = _MARKET_TAG_PATTERN.match(tag)
+    if match is None or match.group("plugin_id") != spec.plugin_id:
+        raise BundledPluginError(
+            f"release_invalid: plugin_id={spec.plugin_id} tag={tag} "
+            "expected <plugin_id>-v<version>"
+        )
     # 自动挑选只认正式版；显式 pin 到的 tag 允许是预发布，便于临时排查。
     if payload.get("prerelease") and not pinned:
         raise BundledPluginError(
             f"release_invalid: plugin_id={spec.plugin_id} tag={tag} prerelease=true"
-        )
-    match = _TAG_PATTERN.match(tag)
-    if match is None:
-        raise BundledPluginError(
-            f"release_invalid: plugin_id={spec.plugin_id} tag={tag} "
-            "expected v<version>"
         )
     version = match.group("version")
     asset_name = f"{spec.plugin_id}-{version}.zip"
@@ -192,7 +194,7 @@ def _parse_release(
         )
     return ResolvedPlugin(
         plugin_id=spec.plugin_id,
-        repo=spec.repo,
+        repo=MARKET_REPO,
         tag=tag,
         version=version,
         asset_name=asset_name,
@@ -201,17 +203,90 @@ def _parse_release(
     )
 
 
-def _resolve_plugin(
+def _market_index_entries(
+    payload: dict[str, Any], *, url: str
+) -> dict[str, dict[str, Any]]:
+    """把市场 index.json 解析成 plugin_id -> entry，保留重复/结构校验。"""
+    schema_version = payload.get("schema_version")
+    if schema_version != 1:
+        raise BundledPluginError(
+            f"market_index_invalid: url={url} schema_version={schema_version}"
+        )
+    raw_plugins = payload.get("plugins")
+    if not isinstance(raw_plugins, list):
+        raise BundledPluginError(f"market_index_invalid: url={url} plugins")
+    entries: dict[str, dict[str, Any]] = {}
+    for item in raw_plugins:
+        if not isinstance(item, dict):
+            continue
+        plugin_id = item.get("plugin_id")
+        if not isinstance(plugin_id, str) or not plugin_id:
+            continue
+        if plugin_id in entries:
+            raise BundledPluginError(
+                f"market_index_invalid: url={url} duplicate plugin_id={plugin_id}"
+            )
+        entries[plugin_id] = item
+    return entries
+
+
+def _parse_market_latest(
     spec: BundledPluginSpec,
+    entry: dict[str, Any],
+) -> ResolvedPlugin:
+    """把市场 index 的 latest 条目转换为构建期解析结果。"""
+    latest = entry.get("latest")
+    if not isinstance(latest, dict):
+        raise BundledPluginError(
+            f"market_index_invalid: plugin_id={spec.plugin_id} latest"
+        )
+    version = latest.get("version")
+    host_api_version = latest.get("host_api_version")
+    download_url = latest.get("download_url")
+    sha256 = latest.get("sha256")
+
+    if not isinstance(version, str) or _VERSION_PATTERN.match(version) is None:
+        raise BundledPluginError(
+            f"market_index_invalid: plugin_id={spec.plugin_id} version={version!r}"
+        )
+    if host_api_version != SUPPORTED_HOST_API_VERSION:
+        raise BundledPluginError(
+            "market_index_incompatible: "
+            f"plugin_id={spec.plugin_id} host_api_version={host_api_version} "
+            f"expected={SUPPORTED_HOST_API_VERSION}"
+        )
+    if not isinstance(download_url, str) or not download_url.startswith("https://"):
+        raise BundledPluginError(
+            f"market_index_invalid: plugin_id={spec.plugin_id} download_url"
+        )
+    if not isinstance(sha256, str) or _SHA256_PATTERN.match(sha256) is None:
+        raise BundledPluginError(
+            f"market_index_invalid: plugin_id={spec.plugin_id} sha256"
+        )
+
+    return ResolvedPlugin(
+        plugin_id=spec.plugin_id,
+        repo=MARKET_REPO,
+        tag=f"{spec.plugin_id}-v{version}",
+        version=version,
+        asset_name=f"{spec.plugin_id}-{version}.zip",
+        asset_url=download_url,
+        checksum_url=None,
+        checksum_sha256=sha256.lower(),
+    )
+
+
+def _resolve_pinned(
+    spec: BundledPluginSpec,
+    pinned_tag: str,
     *,
-    pinned_tag: str | None,
     http_get: HttpGet,
 ) -> ResolvedPlugin:
     url = _release_api_url(spec, pinned_tag)
     return _parse_release(
         spec,
         _load_json(http_get(url), url=url),
-        pinned=pinned_tag is not None,
+        pinned=True,
     )
 
 
@@ -238,12 +313,32 @@ def resolve_plugins(
     http_get: HttpGet,
     pins: dict[str, str] | None = None,
 ) -> list[ResolvedPlugin]:
-    """按插件清单顺序解析全部插件的目标版本。"""
+    """按插件清单顺序解析全部插件的目标版本。
+
+    未 pin 的插件统一从市场 index 读取 latest，index 只请求一次；
+    pin 的插件走市场仓的单插件 Release，便于回滚到历史版本。
+    """
     pins = pins or {}
-    return [
-        _resolve_plugin(spec, pinned_tag=pins.get(spec.plugin_id), http_get=http_get)
-        for spec in BUNDLED_PLUGINS
-    ]
+    latest_entries: dict[str, dict[str, Any]] | None = None
+    resolved: list[ResolvedPlugin] = []
+    for spec in BUNDLED_PLUGINS:
+        pinned_tag = pins.get(spec.plugin_id)
+        if pinned_tag is not None:
+            resolved.append(_resolve_pinned(spec, pinned_tag, http_get=http_get))
+            continue
+        if latest_entries is None:
+            latest_entries = _market_index_entries(
+                _load_json(http_get(MARKET_INDEX_URL), url=MARKET_INDEX_URL),
+                url=MARKET_INDEX_URL,
+            )
+        entry = latest_entries.get(spec.plugin_id)
+        if entry is None:
+            raise BundledPluginError(
+                "market_index_missing_plugin: "
+                f"plugin_id={spec.plugin_id} url={MARKET_INDEX_URL}"
+            )
+        resolved.append(_parse_market_latest(spec, entry))
+    return resolved
 
 
 def _read_manifest_from_archive(payload: bytes, *, url: str) -> dict[str, Any]:
@@ -333,7 +428,15 @@ def fetch_plugins(
                 f"manifest={manifest.get('version')}"
             )
         digest = hashlib.sha256(payload).hexdigest()
-        if item.checksum_url is not None:
+        if item.checksum_sha256 is not None:
+            # 市场 index 直接带 sha256，不需要额外下载 .sha256 资产。
+            if item.checksum_sha256 != digest:
+                raise BundledPluginError(
+                    "archive_checksum_mismatch: "
+                    f"plugin_id={item.plugin_id} market={item.checksum_sha256} "
+                    f"actual={digest}"
+                )
+        elif item.checksum_url is not None:
             # provider 发布了 sha256 资产时交叉比对，防止下载链路损坏而 manifest 仍可读。
             published = _parse_published_sha256(
                 http_get(item.checksum_url), url=item.checksum_url
@@ -378,7 +481,7 @@ def fetch_plugins(
 
 
 def _format_resolved(item: ResolvedPlugin) -> str:
-    checksum = item.checksum_url or "-"
+    checksum = item.checksum_sha256 or item.checksum_url or "-"
     return (
         f"plugin_id={item.plugin_id} tag={item.tag} version={item.version} "
         f"asset={item.asset_url} checksum={checksum}"
