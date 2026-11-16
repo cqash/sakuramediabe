@@ -22,7 +22,6 @@ from src.plugins.installer import PluginInstaller, PluginInstallError
 from src.plugins.loader import (
     PLUGIN_LOAD_ERRORS,
     PluginLoadError,
-    check_plugin_dir,
     load_plugin_settings_model,
     render_plugin_load_error,
 )
@@ -34,6 +33,7 @@ from src.plugins.manifest import (
 )
 from src.plugins.operation_lock import plugin_operation_lock
 from src.plugins.settings_schema import settings_defaults
+from src.plugins.validation import check_plugin_dir_isolated
 
 
 class PluginSettingsValidationError(ValueError):
@@ -235,8 +235,10 @@ class PluginManager:
             validate_host_api_version(manifest.host_api_version)
             # 声明依赖的插件要在完整容器启动时先同步依赖，不能在这里 import。
             # 未声明依赖的既有插件继续保持安装期试加载的行为。
+            # 试加载必须在子进程执行：编译插件会在宿主进程注册残留的 import
+            # finder，进程内重新导入会命中旧版本代码。
             if not manifest.dependencies:
-                check_plugin_dir(
+                check_plugin_dir_isolated(
                     plugin_dir=staging,
                     plugin_settings=settings.plugins,
                 )
@@ -286,7 +288,7 @@ class PluginManager:
                 )
             # 声明依赖的插件在下一次完整容器启动前不导入；其余插件维持安装期校验。
             if not manifest.dependencies:
-                check_plugin_dir(
+                check_plugin_dir_isolated(
                     plugin_dir=staging,
                     plugin_settings=settings.plugins,
                 )

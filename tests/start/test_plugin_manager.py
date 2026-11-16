@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 import zipfile
 from pathlib import Path
 
@@ -271,6 +273,84 @@ def test_manager_upgrade_zip_replaces_only_newer_same_plugin_and_preserves_data(
         )
 
     assert manager.get_plugin("demo_plugin")["version"] == "1.1.0"
+
+
+def _make_importing_plugin_zip(
+    tmp_path: Path,
+    plugin_id: str,
+    *,
+    version: str,
+) -> Path:
+    """插件包根导入子模块 register，模拟编译插件 shim 的嵌套导入。"""
+    pkg = tmp_path / f"{plugin_id}-{version}"
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "manifest.json").write_text(
+        json.dumps(
+            {
+                "plugin_id": plugin_id,
+                "display_name": "演示",
+                "version": version,
+                "host_api_version": HOST_API_VERSION,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (pkg / "__init__.py").write_text("from .impl import register\n", encoding="utf-8")
+    (pkg / "impl.py").write_text(
+        "from src.plugins import HOST_API_VERSION, PluginRegistration\n"
+        "def register(context):\n"
+        f"    return PluginRegistration(plugin_id='{plugin_id}', display_name='演示', "
+        f"version='{version}', host_api_version=HOST_API_VERSION, jobs=())\n",
+        encoding="utf-8",
+    )
+    zip_path = tmp_path / f"{plugin_id}-{version}.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        for name in ("manifest.json", "__init__.py", "impl.py"):
+            archive.write(pkg / name, name)
+    return zip_path
+
+
+class _StaleModuleFinder:
+    """模拟 Nuitka 编译插件注册的 finder：模块名永远绑定在首次加载目录。"""
+
+    def __init__(self, fullname: str, module_path: Path) -> None:
+        self.fullname = fullname
+        self.module_path = module_path
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != self.fullname:
+            return None
+        return importlib.util.spec_from_file_location(fullname, self.module_path)
+
+
+def test_manager_upgrade_zip_ignores_stale_process_import_binding(
+    tmp_path, monkeypatch
+):
+    """升级校验不能复用宿主进程里已加载旧版插件的 import 绑定。"""
+    plugin_id = "demo_plugin"
+    root = tmp_path / "root"
+    manager = PluginManager(root_dir=root)
+    manager.install_zip(
+        _make_importing_plugin_zip(tmp_path, plugin_id, version="1.0.0"),
+        enable=False,
+    )
+
+    stale_finder = _StaleModuleFinder(
+        f"sakuramedia_plugins.{plugin_id}.impl",
+        root / plugin_id / "impl.py",
+    )
+    monkeypatch.setattr(sys, "meta_path", [stale_finder, *sys.meta_path])
+
+    result = manager.upgrade_zip(
+        plugin_id,
+        _make_importing_plugin_zip(tmp_path, plugin_id, version="1.1.0"),
+    )
+
+    assert result == {"plugin_id": plugin_id, "version": "1.1.0"}
+    assert "version='1.1.0'" in (root / plugin_id / "impl.py").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_manager_install_zip_rejects_checksum_mismatch(tmp_path):
