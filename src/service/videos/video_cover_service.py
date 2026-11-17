@@ -1,7 +1,7 @@
-"""非 JAV 视频首帧封面生成 service。
+"""非 JAV 视频封面 service。
 
-导入每个视频时读取**第 0 帧**生成封面，写入 ``VideoItem.cover_image``。
-封面为增益项：PyAV 缺失或解码失败时只记日志、返回 None，绝不阻断导入主流程。
+优先保存元数据插件交付的封面；未提供时读取**第 0 帧**生成封面。
+封面为增益项：读取、解码或落库失败时只记日志、返回 None，绝不阻断导入主流程。
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from PIL import Image as PillowImage
 
 av = None
 
@@ -83,8 +84,45 @@ class VideoCoverService:
                 except Exception:
                     pass
 
-        # 封面落库同样是增益项：DB 写（建 Image 行、回写 cover_image）失败也只记日志返回 None，
-        # 绝不外抛——否则已成功搬运入库的视频会被导入主流程误判为失败文件。
+        return cls._persist_cover(video, cover_path, source_label=source_label)
+
+    @classmethod
+    def import_cover(cls, video: VideoItem, source_path: str | Path) -> Image | None:
+        """保存元数据封面；替换已有封面时清理旧图片，失败返回 None。"""
+        from uuid import uuid4
+
+        cover_path = cls._cover_path(video.id).with_name(f"{uuid4().hex}.webp")
+        obsolete_cover = video.cover_image if video.cover_image_id is not None else None
+        try:
+            with PillowImage.open(source_path) as source:
+                cover_path.parent.mkdir(parents=True, exist_ok=True)
+                source.convert("RGB").save(cover_path, format="WEBP", quality=85)
+        except Exception as exc:
+            logger.warning(
+                "Video metadata cover skipped video_id={} path={} detail={}",
+                video.id,
+                source_path,
+                exc,
+            )
+            return None
+        image = cls._persist_cover(video, cover_path, source_label=str(source_path))
+        if image is None:
+            cover_path.unlink(missing_ok=True)
+            return None
+        if obsolete_cover is not None and obsolete_cover.id != image.id:
+            from src.service.catalog.image_cleanup_service import ImageCleanupService
+
+            obsolete_paths = ImageCleanupService.delete_image_record_if_unused(
+                obsolete_cover
+            )
+            ImageCleanupService.delete_obsolete_image_files(obsolete_paths)
+        return image
+
+    @staticmethod
+    def _persist_cover(
+        video: VideoItem, cover_path: Path, *, source_label: str
+    ) -> Image | None:
+        # 封面落库是增益项，失败不能阻断已完成的媒体导入。
         try:
             image_root = media_image_root_path()
             relative_path = cover_path.relative_to(image_root).as_posix()
@@ -100,5 +138,5 @@ class VideoCoverService:
                 exc,
             )
             return None
-        logger.info("Video cover generated video_id={} relative_path={}", video.id, relative_path)
+        logger.info("Video cover saved video_id={} relative_path={}", video.id, relative_path)
         return image

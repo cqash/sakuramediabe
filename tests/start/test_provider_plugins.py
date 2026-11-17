@@ -35,8 +35,8 @@ from src.plugins.provider_protocol import (
 )
 
 
-def test_plugin_protocol_uses_host_api_v18():
-    assert HOST_API_VERSION == 18
+def test_plugin_protocol_uses_host_api_v19():
+    assert HOST_API_VERSION == 19
 
 
 def test_import_source_validation_is_optional_provider_capability():
@@ -514,11 +514,16 @@ def test_loader_isolates_duplicate_media_provider_key(tmp_path):
     assert PLUGIN_LOAD_ERRORS["second"]["stage"] == "provider_registry"
 
 
-def test_scan_progress_is_enabled_for_host_api_18(tmp_path):
+@pytest.mark.parametrize("api_version", (18, HOST_API_VERSION))
+def test_scan_progress_is_enabled_for_supported_host_apis(tmp_path, api_version):
     _write_bundle_plugin(tmp_path, "scan_plugin", "scan")
+    manifest_path = tmp_path / "scan_plugin" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["host_api_version"] = api_version
+    manifest_path.write_text(json.dumps(manifest))
     loaded = load_enabled_plugins(Plugins(enabled=["scan_plugin"]), root_dir=tmp_path)
     assert len(loaded) == 1
-    assert loaded[0].host_api_version == 18
+    assert loaded[0].host_api_version == api_version
     registry = MediaProviderRegistry()
     registry.replace(loaded)
     assert registry.supports_scan_progress("scan") is True

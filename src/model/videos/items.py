@@ -6,7 +6,7 @@ from src.model.mixins import TimestampedMixin
 
 
 class VideoItem(TimestampedMixin, BaseModel):
-    # 非 JAV 视频条目（无番号、无外部元数据），与 Movie 完全平行，文件归 Media。
+    # 非 JAV 视频条目（无番号），与 Movie 完全平行，文件归 Media，来源信息存 extra。
     title = peewee.CharField(max_length=255, index=True, verbose_name="标题")
     summary = peewee.TextField(default="", verbose_name="描述")
     cover_image = peewee.ForeignKeyField(

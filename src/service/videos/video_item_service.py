@@ -42,6 +42,7 @@ from src.schema.videos.items import (
     VideoItemListItemResource,
     VideoItemUpdateRequest,
 )
+from src.service.videos.video_cover_service import VideoCoverService
 
 
 class VideoItemService:
@@ -215,11 +216,17 @@ class VideoItemService:
         query: str | None = None,
         sort: str | None = None,
         uncollected: bool = False,
+        unmatched: bool = False,
         page: int = 1,
         page_size: int = 20,
     ) -> PageResponse[VideoItemListItemResource]:
         validate_page(page, page_size, error_code="invalid_video_filter")
         base_query = cls._filtered_query(query=query)
+        if unmatched:
+            base_query = base_query.where(
+                VideoItem.extra.is_null()
+                | ~VideoItem.extra.contains('"metadata_source"')
+            )
         if uncollected:
             # 只保留不属于任何视频合集的条目；id 非空，NOT IN 无 NULL 语义坑。
             base_query = base_query.where(
@@ -441,6 +448,21 @@ class VideoItemService:
                 obsolete_cover_image
             )
             ImageCleanupService.delete_obsolete_image_files(obsolete_image_paths)
+        return cls.get_video_detail(video.id)
+
+    @classmethod
+    def apply_metadata(cls, video_id: int, detail, source: dict):
+        video = cls._require_video(video_id)
+        with get_database().atomic():
+            video.title = detail.title
+            video.summary = detail.summary
+            video.release_date = detail.release_date
+            extra = dict(video.extra) if isinstance(video.extra, dict) else {}
+            extra["metadata_source"] = source
+            video.extra = extra
+            video.updated_at = utc_now_for_db()
+            video.save()
+            VideoCoverService.import_cover(video, detail.cover_image_path)
         return cls.get_video_detail(video.id)
 
     @classmethod

@@ -48,6 +48,7 @@ from src.service.transfers.downloads.auto_subscribed.auto_download_service impor
     SubscribedMovieAutoDownloadService,
 )
 from src.service.transfers.downloads.sync_service import DownloadSyncService
+from src.service.videos.video_metadata_source_service import VideoMetadataSourceService
 
 # ---------------------------------------------------------------------------
 # 任务注册表
@@ -326,6 +327,7 @@ _ACTIVE_PLUGINS = tuple(
 )
 refresh_media_provider_registry(_ACTIVE_PLUGINS)
 MetadataSourceService.register(_ACTIVE_PLUGINS)
+VideoMetadataSourceService.register(_ACTIVE_PLUGINS)
 MovieReviewSourceService.register(_ACTIVE_PLUGINS)
 MovieStatsSourceService.register(_ACTIVE_PLUGINS)
 PluginTestService.register(_ACTIVE_PLUGINS)

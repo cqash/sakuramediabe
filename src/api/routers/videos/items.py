@@ -8,7 +8,13 @@ from src.schema.videos.items import (
     VideoItemListItemResource,
     VideoItemUpdateRequest,
 )
+from src.schema.videos.metadata import (
+    VideoMetadataApplyRequest,
+    VideoMetadataCandidateSearchRequest,
+    VideoMetadataCandidateSearchResponse,
+)
 from src.service.videos import VideoItemService
+from src.service.videos.video_metadata_search_service import VideoMetadataSearchService
 
 router = APIRouter(
     prefix="/videos",
@@ -34,6 +40,23 @@ def list_videos(
     )
 
 
+@router.get("/unmatched", response_model=PageResponse[VideoItemListItemResource])
+def list_unmatched_videos(page: int = 1, page_size: int = 20):
+    return VideoItemService.list_videos(
+        unmatched=True,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post(
+    "/metadata/candidates",
+    response_model=VideoMetadataCandidateSearchResponse,
+)
+def search_video_metadata_candidates(payload: VideoMetadataCandidateSearchRequest):
+    return VideoMetadataSearchService.search(payload)
+
+
 @router.post("", response_model=VideoItemDetailResource, status_code=status.HTTP_201_CREATED)
 def create_video(payload: VideoItemCreateRequest):
     return VideoItemService.create_video(payload)
@@ -42,6 +65,11 @@ def create_video(payload: VideoItemCreateRequest):
 @router.get("/{video_id}", response_model=VideoItemDetailResource)
 def get_video(video_id: int):
     return VideoItemService.get_video_detail(video_id)
+
+
+@router.post("/{video_id}/metadata/apply", response_model=VideoItemDetailResource)
+def apply_video_metadata(video_id: int, payload: VideoMetadataApplyRequest):
+    return VideoMetadataSearchService.apply(video_id, payload.candidate_id)
 
 
 @router.patch("/{video_id}", response_model=VideoItemDetailResource)

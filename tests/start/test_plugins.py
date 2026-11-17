@@ -453,7 +453,7 @@ def test_job_definition_rejects_non_object_params():
         job_def.build_executor(["invalid"])
 
 
-@pytest.mark.parametrize("version", (HOST_API_VERSION,))
+@pytest.mark.parametrize("version", (18, HOST_API_VERSION))
 def test_host_api_version_accepts_released_range(version):
     from src.plugins.contracts import PluginRegistration
 
@@ -466,7 +466,7 @@ def test_host_api_version_accepts_released_range(version):
     assert registration.host_api_version == version
 
 
-@pytest.mark.parametrize("version", (HOST_API_VERSION - 1, HOST_API_VERSION + 1))
+@pytest.mark.parametrize("version", (17, HOST_API_VERSION + 1))
 def test_host_api_version_rejects_out_of_range(version):
     from src.plugins.contracts import PluginRegistration
 

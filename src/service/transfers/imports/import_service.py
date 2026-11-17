@@ -642,25 +642,55 @@ class MediaImportService:
                             {"id": movie.id, "movie_number": movie.movie_number, "title": movie.title}
                         )
                     else:
-                        with get_database().atomic():
-                            video = VideoItem.create(title=self._title_for(source))
-                            media = self._create_media(
-                                storage=storage,
-                                movie=None,
-                                video_item=video,
-                                library=library,
-                                source=source,
-                                staged=staged,
-                                source_snapshot=source_snapshot,
-                                download_task_id=download_task_id,
-                                tag_rules=tag_rules,
-                            )
-                            if collection_id is not None:
-                                from src.service.videos.video_collection_service import (
-                                    VideoCollectionService,
-                                )
+                        from src.service.videos.video_metadata_source_service import (
+                            VideoMetadataSourceService,
+                        )
 
-                                VideoCollectionService.add_video(collection_id, video.id)
+                        original_title = self._title_for(source)
+                        with VideoMetadataSourceService.fetch(
+                            original_title, relative_path=source.relative_path
+                        ) as outcome:
+                            detail = outcome.detail if outcome is not None else None
+                            with get_database().atomic():
+                                video = VideoItem.create(
+                                    title=detail.title if detail is not None else original_title,
+                                    summary=detail.summary if detail is not None else "",
+                                    release_date=(
+                                        detail.release_date if detail is not None else None
+                                    ),
+                                    extra={
+                                        "import_query": {
+                                            "title": original_title,
+                                            "relative_path": source.relative_path,
+                                        },
+                                        **(
+                                            {"metadata_source": outcome.source}
+                                            if outcome is not None
+                                            else {}
+                                        ),
+                                    },
+                                )
+                                if detail is not None:
+                                    VideoCoverService.import_cover(
+                                        video, detail.cover_image_path
+                                    )
+                                media = self._create_media(
+                                    storage=storage,
+                                    movie=None,
+                                    video_item=video,
+                                    library=library,
+                                    source=source,
+                                    staged=staged,
+                                    source_snapshot=source_snapshot,
+                                    download_task_id=download_task_id,
+                                    tag_rules=tag_rules,
+                                )
+                                if collection_id is not None:
+                                    from src.service.videos.video_collection_service import (
+                                        VideoCollectionService,
+                                    )
+
+                                    VideoCollectionService.add_video(collection_id, video.id)
                         created_video_ids.append(video.id)
                 except ProviderOperationError as exc:
                     failed_count += 1
@@ -739,7 +769,11 @@ class MediaImportService:
                         imported_count += 1
                         if media_kind == "jav":
                             self._subscribe_imported_movie(movie)
-                        if video is not None and media is not None:
+                        if (
+                            video is not None
+                            and media is not None
+                            and getattr(video, "cover_image_id", None) is None
+                        ):
                             self._generate_video_cover(
                                 storage=storage,
                                 video=video,

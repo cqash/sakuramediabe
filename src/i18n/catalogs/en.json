@@ -286,6 +286,11 @@
   "errors.video_cover_thumbnail_not_found": "Video cover thumbnail not found",
   "errors.video_cover_thumbnail_required": "cover_thumbnail_id cannot be null",
   "errors.video_item_not_found": "Video not found",
+  "errors.invalid_video_metadata_candidate": "Video metadata candidate is invalid, expired, or belongs to another video",
+  "errors.invalid_video_metadata_query": "Video has no searchable title",
+  "errors.video_metadata_candidate_mismatch": "The returned metadata does not match the selected video candidate",
+  "errors.video_metadata_candidate_unavailable": "Video metadata candidate is no longer available from its source",
+  "errors.video_metadata_fetch_failed": "Failed to fetch video metadata",
   "tasks.library_import.progress.pending": {
     "one": "1 download task pending",
     "other": "{count} download tasks pending"

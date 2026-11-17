@@ -47,6 +47,10 @@ from src.plugins.extensions.stats import (
     STATS_SOURCE_EXTENSION_KEY,
     STATS_SOURCE_HOST_API_VERSION,
 )
+from src.plugins.extensions.video_metadata import (
+    VIDEO_METADATA_SOURCE_EXTENSION_KEY,
+    VIDEO_METADATA_SOURCE_HOST_API_VERSION,
+)
 from src.plugins.i18n import validate_plugin_catalogs
 from src.plugins.manifest import MANIFEST_FILENAME, load_manifest_from_file
 from src.plugins.provider_protocol import refresh_media_provider_registry
@@ -413,6 +417,21 @@ def _load_plugin_dir(
             "元数据来源插件的 manifest 必须声明 Host API "
             f"{METADATA_SOURCE_HOST_API_VERSION} 或更高版本",
             min_version=METADATA_SOURCE_HOST_API_VERSION,
+        )
+    if (
+        any(
+            ext.key == VIDEO_METADATA_SOURCE_EXTENSION_KEY
+            for ext in registration.extensions
+        )
+        and manifest.host_api_version < VIDEO_METADATA_SOURCE_HOST_API_VERSION
+    ):
+        raise _load_error(
+            plugin_id,
+            "validate_extensions",
+            "plugins.load_error.video_metadata_source_host_api_too_low",
+            "普通视频元数据来源插件的 manifest 必须声明 Host API "
+            f"{VIDEO_METADATA_SOURCE_HOST_API_VERSION} 或更高版本",
+            min_version=VIDEO_METADATA_SOURCE_HOST_API_VERSION,
         )
     if (
         any(ext.key == REVIEWS_EXTENSION_KEY for ext in registration.extensions)

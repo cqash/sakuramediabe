@@ -30,6 +30,10 @@ from src.plugins.extensions.stats import (
     STATS_SOURCE_EXTENSION_KEY,
     validate_stats_extension,
 )
+from src.plugins.extensions.video_metadata import (
+    VIDEO_METADATA_SOURCE_EXTENSION_KEY,
+    validate_video_metadata_extension,
+)
 
 # key -> validator(plugin_id, extension)；未登记的 key 会被 loader 拒绝。
 EXTENSION_VALIDATORS: dict[str, Callable[..., Any]] = {
@@ -38,6 +42,7 @@ EXTENSION_VALIDATORS: dict[str, Callable[..., Any]] = {
     STATS_SOURCE_EXTENSION_KEY: validate_stats_extension,
     RANKING_SOURCE_EXTENSION_KEY: validate_ranking_extension,
     MEDIA_PROVIDER_EXTENSION_KEY: validate_media_provider_extension,
+    VIDEO_METADATA_SOURCE_EXTENSION_KEY: validate_video_metadata_extension,
 }
 
 # 允许同一插件重复声明的扩展点；未列出的 key 仍要求插件内部唯一。

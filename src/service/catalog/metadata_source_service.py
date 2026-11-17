@@ -121,9 +121,9 @@ class MetadataSourceService:
         )
 
     @staticmethod
-    def _delivery_paths(detail: PluginMovieMetadata, root: Path) -> Iterator[Path]:
+    def _delivery_paths(detail, root: Path) -> Iterator[Path]:
         request_dir = None
-        for raw in [detail.cover_image_path, *detail.plot_image_paths]:
+        for raw in [detail.cover_image_path, *getattr(detail, "plot_image_paths", [])]:
             path = Path(raw).resolve()
             relative = path.relative_to(root.resolve())
             if len(relative.parts) < 2 or not path.is_file():
