@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import sys
+import zipfile
 from pathlib import Path
+
+import pytest
 
 from src.plugins.bundled import (
     install_bundled_plugins,
@@ -219,3 +223,257 @@ def test_invalid_installed_version_is_recorded_as_failure(tmp_path):
     assert result.skipped_existing == ()
     assert [plugin_id for plugin_id, _ in result.failed] == ["demo_plugin"]
     assert manager.upgrade_calls == []
+
+
+def _market_entry(
+    plugin_id: str,
+    *,
+    version: str = "1.0.0",
+    host_api_version: int = 18,
+    sha256: str | None = None,
+    download_url: str | None = None,
+) -> dict:
+    if sha256 is None:
+        sha256 = "a" * 64
+    if download_url is None:
+        download_url = (
+            f"https://github.com/tinypinglite/sakuramedia-plugin-market/releases/"
+            f"download/{plugin_id}-v{version}/{plugin_id}-{version}.zip"
+        )
+    return {
+        "plugin_id": plugin_id,
+        "official": True,
+        "latest": {
+            "version": version,
+            "host_api_version": host_api_version,
+            "download_url": download_url,
+            "sha256": sha256,
+            "published_at": "2026-11-17T00:00:00Z",
+        },
+    }
+
+
+def _market_index(entries: list[dict]) -> dict:
+    return {"schema_version": 1, "plugins": entries}
+
+
+def _http_get(payloads: dict[str, object]):
+    def http_get(url: str) -> bytes:
+        payload = payloads[url]
+        if isinstance(payload, bytes):
+            return payload
+        return json.dumps(payload).encode("utf-8")
+
+    return http_get
+
+
+def _plugin_zip(plugin_id: str, version: str) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("__init__.py", "")
+        archive.writestr(
+            "manifest.json",
+            json.dumps({"plugin_id": plugin_id, "version": version}),
+        )
+    return buffer.getvalue()
+
+
+def test_bundled_plugin_ids_are_unique():
+    module = _load_fetch_bundled_plugins_module()
+
+    plugin_ids = [spec.plugin_id for spec in module.BUNDLED_PLUGINS]
+
+    assert len(plugin_ids) == 5
+    assert len(set(plugin_ids)) == 5
+
+
+def test_resolve_plugins_reads_market_index(monkeypatch):
+    module = _load_fetch_bundled_plugins_module()
+    monkeypatch.setattr(
+        module, "BUNDLED_PLUGINS", (module.BundledPluginSpec("demo_plugin"),)
+    )
+    entry = _market_entry("demo_plugin", version="1.2.3", sha256="b" * 64)
+    http_get = _http_get(
+        {module.MARKET_INDEX_URL: _market_index([entry])}
+    )
+
+    resolved = module.resolve_plugins(http_get=http_get)
+
+    assert [(item.plugin_id, item.version, item.tag) for item in resolved] == [
+        ("demo_plugin", "1.2.3", "demo_plugin-v1.2.3")
+    ]
+    assert resolved[0].asset_name == "demo_plugin-1.2.3.zip"
+    assert resolved[0].checksum_sha256 == "b" * 64
+    assert resolved[0].checksum_url is None
+
+
+def test_resolve_plugins_fetches_market_index_once(monkeypatch):
+    module = _load_fetch_bundled_plugins_module()
+    monkeypatch.setattr(
+        module,
+        "BUNDLED_PLUGINS",
+        (
+            module.BundledPluginSpec("demo_a"),
+            module.BundledPluginSpec("demo_b"),
+        ),
+    )
+    calls: list[str] = []
+
+    def http_get(url: str) -> bytes:
+        calls.append(url)
+        return json.dumps(
+            _market_index(
+                [
+                    _market_entry("demo_a", version="1.0.0"),
+                    _market_entry("demo_b", version="2.0.0"),
+                ]
+            )
+        ).encode("utf-8")
+
+    resolved = module.resolve_plugins(http_get=http_get)
+
+    assert [item.version for item in resolved] == ["1.0.0", "2.0.0"]
+    assert calls == [module.MARKET_INDEX_URL]
+
+
+def test_resolve_plugins_rejects_missing_market_plugin(monkeypatch):
+    module = _load_fetch_bundled_plugins_module()
+    monkeypatch.setattr(
+        module, "BUNDLED_PLUGINS", (module.BundledPluginSpec("demo_plugin"),)
+    )
+    http_get = _http_get({module.MARKET_INDEX_URL: _market_index([])})
+
+    with pytest.raises(module.BundledPluginError, match="market_index_missing_plugin"):
+        module.resolve_plugins(http_get=http_get)
+
+
+def test_resolve_plugins_rejects_incompatible_host_api(monkeypatch):
+    module = _load_fetch_bundled_plugins_module()
+    monkeypatch.setattr(
+        module, "BUNDLED_PLUGINS", (module.BundledPluginSpec("demo_plugin"),)
+    )
+    entry = _market_entry("demo_plugin", host_api_version=17)
+    http_get = _http_get(
+        {module.MARKET_INDEX_URL: _market_index([entry])}
+    )
+
+    with pytest.raises(module.BundledPluginError, match="market_index_incompatible"):
+        module.resolve_plugins(http_get=http_get)
+
+
+def test_resolve_plugins_rejects_invalid_sha256(monkeypatch):
+    module = _load_fetch_bundled_plugins_module()
+    monkeypatch.setattr(
+        module, "BUNDLED_PLUGINS", (module.BundledPluginSpec("demo_plugin"),)
+    )
+    entry = _market_entry("demo_plugin", sha256="not-a-sha256")
+    http_get = _http_get(
+        {module.MARKET_INDEX_URL: _market_index([entry])}
+    )
+
+    with pytest.raises(module.BundledPluginError, match="market_index_invalid"):
+        module.resolve_plugins(http_get=http_get)
+
+
+def test_pinned_plugin_uses_market_release(monkeypatch):
+    module = _load_fetch_bundled_plugins_module()
+    monkeypatch.setattr(
+        module, "BUNDLED_PLUGINS", (module.BundledPluginSpec("demo_plugin"),)
+    )
+    tag = "demo_plugin-v0.9.0"
+    release = {
+        "tag_name": tag,
+        "draft": False,
+        "prerelease": False,
+        "assets": [
+            {
+                "name": "demo_plugin-0.9.0.zip",
+                "browser_download_url": "https://example.test/demo_plugin-0.9.0.zip",
+            },
+            {
+                "name": "demo_plugin-0.9.0.zip.sha256",
+                "browser_download_url": (
+                    "https://example.test/demo_plugin-0.9.0.zip.sha256"
+                ),
+            },
+        ],
+    }
+    release_url = (
+        f"{module.GITHUB_API_ROOT}/repos/{module.MARKET_REPO}/releases/tags/{tag}"
+    )
+    http_get = _http_get({release_url: release})
+    pins = module.parse_pins(["demo_plugin=v0.9.0"])
+
+    resolved = module.resolve_plugins(http_get=http_get, pins=pins)
+
+    assert resolved[0].tag == tag
+    assert resolved[0].version == "0.9.0"
+    assert resolved[0].checksum_url == (
+        "https://example.test/demo_plugin-0.9.0.zip.sha256"
+    )
+    assert resolved[0].checksum_sha256 is None
+
+
+def test_fetch_plugins_uses_market_sha256(tmp_path, monkeypatch):
+    module = _load_fetch_bundled_plugins_module()
+    monkeypatch.setattr(
+        module, "BUNDLED_PLUGINS", (module.BundledPluginSpec("demo_plugin"),)
+    )
+    archive = _plugin_zip("demo_plugin", "1.0.0")
+    digest = hashlib.sha256(archive).hexdigest()
+    asset_url = "https://example.test/demo_plugin-1.0.0.zip"
+    entry = _market_entry(
+        "demo_plugin",
+        version="1.0.0",
+        sha256=digest,
+        download_url=asset_url,
+    )
+    http_get = _http_get(
+        {
+            module.MARKET_INDEX_URL: _market_index([entry]),
+            asset_url: archive,
+        }
+    )
+
+    resolved, index_path, build_info_path = module.fetch_plugins(
+        output_dir=tmp_path,
+        http_get=http_get,
+    )
+
+    assert resolved[0].version == "1.0.0"
+    assert (tmp_path / "demo_plugin-1.0.0.zip").read_bytes() == archive
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index["plugins"] == [
+        {
+            "filename": "demo_plugin-1.0.0.zip",
+            "plugin_id": "demo_plugin",
+            "sha256": digest,
+            "version": "1.0.0",
+        }
+    ]
+    build_info = json.loads(build_info_path.read_text(encoding="utf-8"))
+    assert build_info["plugins"][0]["repo"] == module.MARKET_REPO
+
+
+def test_fetch_plugins_rejects_market_checksum_mismatch(tmp_path, monkeypatch):
+    module = _load_fetch_bundled_plugins_module()
+    monkeypatch.setattr(
+        module, "BUNDLED_PLUGINS", (module.BundledPluginSpec("demo_plugin"),)
+    )
+    archive = _plugin_zip("demo_plugin", "1.0.0")
+    asset_url = "https://example.test/demo_plugin-1.0.0.zip"
+    entry = _market_entry(
+        "demo_plugin",
+        version="1.0.0",
+        sha256="c" * 64,
+        download_url=asset_url,
+    )
+    http_get = _http_get(
+        {
+            module.MARKET_INDEX_URL: _market_index([entry]),
+            asset_url: archive,
+        }
+    )
+
+    with pytest.raises(module.BundledPluginError, match="archive_checksum_mismatch"):
+        module.fetch_plugins(output_dir=tmp_path, http_get=http_get)

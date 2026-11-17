@@ -7,18 +7,20 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # ── Stage 2: 内置官方插件包（仅 CI 发布构建启用）──
 # SAKURAMEDIA_BUNDLED_PLUGINS 默认 0：本地手动 docker build 不下载任何插件，
 # /app/bundled-plugins 只是空目录，容器启动时的内置安装步骤自动跳过。
-# 版本不写死：构建期取各插件仓库的 latest 正式 Release；需要复现历史镜像时用
-# SAKURAMEDIA_BUNDLED_PLUGIN_PINS="sakuramedia_local_provider=v0.2.6" 固定单个插件。
-# 取插件的结果依赖 GitHub 上的外部状态，不在 build arg 里；BuildKit 缓存只认
+# 版本不写死：构建期从插件市场 index.json 读取各插件的 latest 正式版本；需要复现历史
+# 镜像时用 SAKURAMEDIA_BUNDLED_PLUGIN_PINS="sakuramedia_local_provider=v0.2.6" 固定
+# 单个插件（pin 走市场仓的 <plugin_id>-v<version> Release）。
+# 取插件的结果依赖市场 index 的外部状态，不在 build arg 里；BuildKit 缓存只认
 # 命令与 build arg，于是同一份源码的重复发版会直接复用旧层、把上一版插件固化进镜像。
-# 发布流水线传 SAKURAMEDIA_BUNDLED_PLUGINS_REFRESH=<本次 tag>，让每次发版都重新解析
-# 插件 latest Release。
+# 发布流水线传 SAKURAMEDIA_BUNDLED_PLUGINS_REFRESH=<本次 tag>，让每次发版都重新读取
+# 市场 index。
 FROM python:3.10-slim-bookworm@sha256:68d914ec641a0b69267ce65184d000a2bc3a9ee2590ab702b82250ab2385735a AS bundled
 ARG SAKURAMEDIA_BUNDLED_PLUGINS=0
 ARG SAKURAMEDIA_BUNDLED_PLUGIN_PINS=""
 ARG SAKURAMEDIA_BUNDLED_PLUGINS_REFRESH=""
 COPY docker/backend/fetch_bundled_plugins.py /opt/bundled/fetch_bundled_plugins.py
-# token 通过 BuildKit secret 传入，不进镜像层也不进 docker history；缺失时回退匿名请求。
+# token 通过 BuildKit secret 传入，不进镜像层也不进 docker history；index 是公开静态文件，
+# 只有 pin 走 GitHub Release API 时才需要，缺失时回退匿名请求。
 RUN --mount=type=secret,id=github_token,required=false \
     set -eu; \
     echo "bundled plugins refresh=${SAKURAMEDIA_BUNDLED_PLUGINS_REFRESH}"; \

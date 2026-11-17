@@ -128,6 +128,46 @@ def test_media_playback_gateway_records_actual_playback_mode(
     assert mode_response.json() == {"mode": "direct"}
 
 
+@pytest.mark.parametrize("delivery", ("redirect", "proxy"))
+def test_media_playback_gateway_exposes_attempt_id_to_provider(
+    client,
+    test_db,
+    build_signed_media_url,
+    monkeypatch,
+    delivery,
+):
+    media = _media("gateway-attempt")
+    seen = {}
+
+    class Storage:
+        async def handle_playback(self, *, media, context):
+            seen["attempt_id"] = context.request.query_params.get(
+                "playback_attempt_id"
+            )
+            seen["delivery"] = context.delivery
+            return PlainTextResponse("provider response")
+
+    monkeypatch.setattr(
+        MEDIA_PROVIDER_REGISTRY,
+        "require",
+        lambda _provider_key: SimpleNamespace(
+            playback_deliveries=("redirect", "proxy")
+        ),
+    )
+    monkeypatch.setattr(
+        MEDIA_PROVIDER_REGISTRY, "storage_for", lambda _handle: Storage()
+    )
+    attempt_id = uuid4().hex
+
+    response = client.get(
+        f"{build_signed_media_url(media.id, delivery=delivery)}"
+        f"&playback_attempt_id={attempt_id}"
+    )
+
+    assert response.status_code == 200
+    assert seen == {"attempt_id": attempt_id, "delivery": delivery}
+
+
 def test_media_playback_gateway_maps_provider_error(
     client,
     test_db,
